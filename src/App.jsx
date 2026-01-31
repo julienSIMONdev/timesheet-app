@@ -140,6 +140,8 @@ export default function TimesheetApp() {
             </header>
             <main className="max-w-7xl mx-auto px-4 py-8">
                 {currentUser.role === 'employee' && <EmployeeView currentUser={currentUser} timeEntries={timeEntries} projects={projects} onDelete={handleDeleteEntry} onEdit={handleEditEntry} onAdd={() => { setEditingEntry(null); setShowAddEntry(true); }} t={t} />}
+                {currentUser.role === 'chef' && <ChefAtelierView currentUser={currentUser} timeEntries={timeEntries} projects={projects} onDelete={handleDeleteEntry} onEdit={handleEditEntry} onAdd={() => { setEditingEntry(null); setShowAddEntry(true); }} t={t} />}
+
                 {currentUser.role === 'rh' && <RHView timeEntries={timeEntries} users={users} onDeleteUser={handleDeleteUser} t={t} />}
                 {currentUser.role === 'patron' && <PatronView timeEntries={timeEntries} projects={projects} onAddProject={() => setShowAddProject(true)} onDeleteProject={handleDeleteProject} onDeleteClient={handleDeleteClient} onDeleteEntry={handleDeleteEntry} onDeleteUser={handleDeleteUser} users={users} currentUser={currentUser} t={t} />}
             </main>
@@ -180,6 +182,7 @@ function SignupScreen({ onSignup, onBack, users, darkMode, setDarkMode, t }) {
 
     const hasPatron = users.some(u => u.role === 'patron');
     const hasRH = users.some(u => u.role === 'rh');
+    const hasChef = users.some(u => u.role === 'chef');
 
     const create = () => {
         setError('');
@@ -189,6 +192,7 @@ function SignupScreen({ onSignup, onBack, users, darkMode, setDarkMode, t }) {
         if (users.find(u => u.name === name)) { setError('Ce nom existe déjà'); return; }
         if (role === 'patron' && hasPatron) { setError('Un patron existe déjà'); return; }
         if (role === 'rh' && hasRH) { setError('Un RH existe déjà'); return; }
+        if (role === 'chef' && hasChef) { setError('Un chef d\'atelier existe déjà'); return; }
         onSignup({ name, password, role });
     };
 
@@ -205,6 +209,7 @@ function SignupScreen({ onSignup, onBack, users, darkMode, setDarkMode, t }) {
                         <select value={role} onChange={e => setRole(e.target.value)} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
                             <option value="employee">Employé</option>
                             {!hasRH && <option value="rh">RH</option>}
+                            {!hasChef && <option value="chef">Chef d'atelier</option>}
                             {!hasPatron && <option value="patron">Patron</option>}
                         </select>
                     </div>
@@ -328,7 +333,213 @@ function AddEntryModal({ onClose, onSave, editing, date: initDate, projects, t, 
         </div>
     );
 }
+function ChefAtelierView({ currentUser, timeEntries, projects, onDelete, onEdit, onAdd, t }) {
+  const [view, setView] = useState('heures');
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [selectedWeek, setSelectedWeek] = useState('all');
+  const [selectedProject, setSelectedProject] = useState('');
+  const [selectedClient, setSelectedClient] = useState('all');
+  
+  const myEntries = timeEntries.filter(e => e.userId === currentUser.id);
+  const weeks = [...new Set(myEntries.map(e => `${getWeekYear(e.date)}-S${getWeekNumber(e.date)}`))].sort().reverse();
+  const filteredEntries = selectedWeek === 'all' ? myEntries : myEntries.filter(e => `${getWeekYear(e.date)}-S${getWeekNumber(e.date)}` === selectedWeek);
+  const byDate = filteredEntries.reduce((a, e) => { if (!a[e.date]) a[e.date] = []; a[e.date].push(e); return a; }, {});
+  const dates = Object.keys(byDate).sort().reverse();
+  const total = filteredEntries.reduce((s, e) => s + e.hours, 0);
+  const paniers = countPaniers(filteredEntries);
+  const totalAtelier = filteredEntries.filter(e => e.category === 'atelier').reduce((s, e) => s + e.hours, 0);
+  const totalPose = filteredEntries.filter(e => e.category === 'pose').reduce((s, e) => s + e.hours, 0);
+  const totalTrajet = filteredEntries.filter(e => e.category === 'trajet').reduce((s, e) => s + e.hours, 0);
 
+  const allAtelierEntries = timeEntries.filter(e => e.category === 'atelier' && e.subCategory !== 'Vernis');
+  const allVernisEntries = timeEntries.filter(e => e.category === 'atelier' && e.subCategory === 'Vernis');
+  const allPoseEntries = timeEntries.filter(e => e.category === 'pose');
+
+  const getProjectStats = (projectId) => {
+    const p = projects.find(pr => pr.id === projectId);
+    if (!p) return null;
+    const atelierHours = allAtelierEntries.filter(e => e.projectId === projectId).reduce((s, e) => s + e.hours, 0);
+    const vernisHours = allVernisEntries.filter(e => e.projectId === projectId).reduce((s, e) => s + e.hours, 0);
+    const poseHours = allPoseEntries.filter(e => e.projectId === projectId).reduce((s, e) => s + e.hours, 0);
+    return { ...p, atelierHours, vernisHours, poseHours };
+  };
+
+  const projectsWithStats = projects.map(p => getProjectStats(p.id)).filter(Boolean);
+  const clients = [...new Set(projects.map(p => p.client))].sort();
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 style={{ color: t.accent }} className="text-2xl font-bold">Chef d'atelier</h2>
+        <div className="flex gap-2">
+          <button onClick={() => setView('heures')} style={{ backgroundColor: view === 'heures' ? t.btn : t.bg, color: view === 'heures' ? t.btnText : t.text, border: `2px solid ${t.border}` }} className="px-4 py-2 rounded-lg font-semibold">Mes heures</button>
+          <button onClick={() => setView('projets')} style={{ backgroundColor: view === 'projets' ? t.btn : t.bg, color: view === 'projets' ? t.btnText : t.text, border: `2px solid ${t.border}` }} className="px-4 py-2 rounded-lg font-semibold">Vue projets</button>
+        </div>
+      </div>
+
+      {view === 'heures' && (
+        <>
+          <div className="flex justify-end">
+            <button onClick={onAdd} style={{ backgroundColor: t.btn, color: t.btnText }} className="flex items-center px-4 py-2 rounded-lg font-semibold"><Plus className="w-5 h-5 mr-2" />Ajouter</button>
+          </div>
+          <div>
+            <label style={{ color: t.text }} className="block text-sm font-medium mb-2">Semaine</label>
+            <select value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
+              <option value="all">Toutes les semaines</option>
+              {weeks.map(w => <option key={w} value={w}>{formatWeekLabel(w)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ color: t.text }} className="block text-sm font-medium mb-2">Voir un projet</label>
+            <select onChange={e => setSelectedProject(e.target.value)} value={selectedProject} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
+              <option value="">-- Sélectionner un projet --</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.client} - {p.name}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="p-6 rounded-lg">
+              <p style={{ color: t.textMuted }} className="mb-2">Total heures</p>
+              <p style={{ color: t.accent }} className="text-2xl font-bold">{formatHours(total)}</p>
+              <div className="mt-2 text-sm">
+                <p style={{ color: t.textMuted }}>Atelier: <span style={{ color: t.text }}>{formatHours(totalAtelier)}</span></p>
+                <p style={{ color: t.textMuted }}>Pose: <span style={{ color: t.text }}>{formatHours(totalPose)}</span></p>
+                <p style={{ color: t.textMuted }}>Trajet: <span style={{ color: t.text }}>{formatHours(totalTrajet)}</span></p>
+              </div>
+            </div>
+            <div style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="p-6 rounded-lg">
+              <p style={{ color: t.textMuted }}>Paniers</p>
+              <p style={{ color: t.accent }} className="text-3xl font-bold">{paniers}</p>
+            </div>
+          </div>
+          <div className="space-y-4">
+            {dates.map(d => {
+              const dayEntries = byDate[d];
+              const dayTotal = dayEntries.reduce((s, e) => s + e.hours, 0);
+              const hasPanier = dayEntries.some(e => e.category === 'panier');
+              return (
+                <div key={d} style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="rounded-lg p-4">
+                  <div className="mb-3"><h3 style={{ color: t.accent }} className="font-bold text-lg">{formatDate(d)}</h3><p style={{ color: t.textMuted }} className="text-sm">{formatHours(dayTotal)}{hasPanier && ' 🍽️'}</p></div>
+                  <div className="space-y-2">
+                    {dayEntries.map(e => {
+                      const proj = e.projectId ? projects.find(p => p.id === e.projectId) : null;
+                      return (
+                        <div key={e.id} style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="flex justify-between items-start p-3 rounded">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2"><span style={{ color: t.text }} className="font-semibold capitalize">{e.category}{e.subCategory ? ` - ${e.subCategory}` : ''}</span>{e.category !== 'panier' && <span style={{ color: t.textMuted }}>{e.startTime} - {e.endTime} ({formatHours(e.hours)})</span>}</div>
+                            {proj ? <p style={{ color: t.textMuted }} className="text-sm mt-1">{proj.client} - {proj.name}</p> : e.clientName && <p style={{ color: t.textMuted }} className="text-sm mt-1">{e.clientName}</p>}
+                            {e.description && <p style={{ color: t.textMuted }} className="text-sm mt-1">{e.description}</p>}
+                          </div>
+                          <div className="flex space-x-4 ml-4"><button onClick={() => onEdit(e)} style={{ color: t.accent }}><Edit className="w-5 h-5" /></button><button onClick={() => setConfirmDelete(e.id)} className="text-red-500"><Trash2 className="w-5 h-5" /></button></div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+        {view === 'projets' && (
+        <div className="space-y-4">
+          <div>
+            <label style={{ color: t.text }} className="block text-sm font-medium mb-2">Client</label>
+            <select value={selectedClient} onChange={e => setSelectedClient(e.target.value)} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
+              <option value="all">Tous les clients</option>
+              {clients.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          {projectsWithStats.filter(p => selectedClient === 'all' || p.client === selectedClient).map(p => (
+            <div key={p.id} style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="rounded-lg p-4">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h3 style={{ color: t.accent }} className="text-lg font-bold">{p.client}</h3>
+                  <p style={{ color: t.textMuted }}>{p.name}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-3 rounded text-center">
+                  <p style={{ color: t.accent }} className="font-semibold">Atelier</p>
+                  <p style={{ color: t.text }} className="font-bold">{formatHours(p.atelierHours)}</p>
+                </div>
+                <div style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-3 rounded text-center">
+                  <p style={{ color: '#f97316' }} className="font-semibold">Vernis</p>
+                  <p style={{ color: t.text }} className="font-bold">{formatHours(p.vernisHours)}</p>
+                </div>
+                <div style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-3 rounded text-center">
+                  <p style={{ color: '#22c55e' }} className="font-semibold">Pose</p>
+                  <p style={{ color: t.text }} className="font-bold">{formatHours(p.poseHours)}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selectedProject && (() => {
+        const p = projects.find(pr => pr.id === selectedProject);
+        if (!p) return null;
+        const projectEntries = timeEntries.filter(e => e.projectId === p.id);
+        const atelierDone = projectEntries.filter(e => e.category === 'atelier').reduce((s, e) => s + e.hours, 0);
+        const poseDone = projectEntries.filter(e => e.category === 'pose').reduce((s, e) => s + e.hours, 0);
+        const atelierPct = (p.estimatedAtelierHours || 0) > 0 ? (atelierDone / p.estimatedAtelierHours) * 100 : 0;
+        const posePct = (p.estimatedPoseHours || 0) > 0 ? (poseDone / p.estimatedPoseHours) * 100 : 0;
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <div style={{ backgroundColor: t.card, border: `2px solid ${t.border}` }} className="rounded-lg p-6 w-full max-w-md">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 style={{ color: t.accent }} className="text-xl font-bold">{p.name}</h3>
+                  <p style={{ color: t.textMuted }}>{p.client}</p>
+                </div>
+                <button onClick={() => setSelectedProject('')} style={{ color: t.text }}><X className="w-6 h-6" /></button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span style={{ color: t.accent }} className="text-sm font-semibold">Atelier: {formatHours(atelierDone)} / {formatHours(p.estimatedAtelierHours || 0)}</span>
+                    <span style={{ color: (p.estimatedAtelierHours || 0) - atelierDone >= 0 ? '#22c55e' : '#ef4444' }} className="text-sm font-semibold">
+                      {(p.estimatedAtelierHours || 0) - atelierDone >= 0 ? 'Reste' : 'Dépassement'}: {formatHours(Math.abs((p.estimatedAtelierHours || 0) - atelierDone))}
+                    </span>
+                  </div>
+                  <div style={{ backgroundColor: t.bg }} className="h-3 rounded overflow-hidden">
+                    <div style={{ width: `${Math.min(atelierPct, 100)}%`, backgroundColor: atelierPct > 100 ? '#ef4444' : atelierPct > 80 ? '#eab308' : '#22c55e' }} className="h-full" />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span style={{ color: t.accent }} className="text-sm font-semibold">Pose: {formatHours(poseDone)} / {formatHours(p.estimatedPoseHours || 0)}</span>
+                    <span style={{ color: (p.estimatedPoseHours || 0) - poseDone >= 0 ? '#22c55e' : '#ef4444' }} className="text-sm font-semibold">
+                      {(p.estimatedPoseHours || 0) - poseDone >= 0 ? 'Reste' : 'Dépassement'}: {formatHours(Math.abs((p.estimatedPoseHours || 0) - poseDone))}
+                    </span>
+                  </div>
+                  <div style={{ backgroundColor: t.bg }} className="h-3 rounded overflow-hidden">
+                    <div style={{ width: `${Math.min(posePct, 100)}%`, backgroundColor: posePct > 100 ? '#ef4444' : posePct > 80 ? '#eab308' : '#22c55e' }} className="h-full" />
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setSelectedProject('')} style={{ backgroundColor: t.btn, color: t.btnText }} className="w-full py-2 rounded-lg font-semibold mt-6">Fermer</button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div style={{ backgroundColor: t.card, border: `2px solid ${t.border}` }} className="rounded-lg p-6 w-full max-w-sm">
+            <h3 style={{ color: t.accent }} className="text-xl font-bold mb-4">Confirmer la suppression</h3>
+            <p style={{ color: t.text }} className="mb-6">Supprimer cette entrée ?</p>
+            <div className="flex space-x-3">
+              <button onClick={() => setConfirmDelete(null)} style={{ backgroundColor: t.bg, color: t.text, border: `1px solid ${t.border}` }} className="flex-1 py-2 rounded-lg">Annuler</button>
+              <button onClick={() => { onDelete(confirmDelete); setConfirmDelete(null); }} className="flex-1 bg-red-600 text-white py-2 rounded-lg">Supprimer</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 function EmployeeView({ currentUser, timeEntries, projects, onDelete, onEdit, onAdd, t }) {
     const [confirmDelete, setConfirmDelete] = useState(null);
     const [selectedWeek, setSelectedWeek] = useState('all');
