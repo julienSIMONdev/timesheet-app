@@ -10,6 +10,33 @@ const getWeekYear = (d) => { const date = new Date(d); date.setHours(0, 0, 0, 0)
 const getWeekDates = (year, week) => { const jan4 = new Date(year, 0, 4); const dow = jan4.getDay() || 7; const mon1 = new Date(jan4); mon1.setDate(jan4.getDate() - dow + 1); const mon = new Date(mon1); mon.setDate(mon1.getDate() + (week - 1) * 7); const fri = new Date(mon); fri.setDate(mon.getDate() + 4); const fmt = (d) => `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}`; return `${fmt(mon)} au ${fmt(fri)}`; };
 const formatWeekLabel = (k) => { const [y, w] = k.split('-S'); return `Semaine ${parseInt(w)} du ${getWeekDates(parseInt(y), parseInt(w))}`; };
 const countPaniers = (entries) => new Set(entries.filter(e => e.category === 'panier').map(e => e.date)).size;
+const calcTrajetSplit = (startTime, endTime) => {
+    if (!startTime || !endTime) return { travail: 0, workhors: 0 };
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    const startMin = sh * 60 + sm;
+    const endMin = eh * 60 + em;
+
+    // Plages de travail en minutes: 7h30-12h et 13h30-17h30
+    const workRanges = [
+        { start: 7 * 60 + 30, end: 12 * 60 },      // 7h30 - 12h00
+        { start: 13 * 60 + 30, end: 17 * 60 + 30 } // 13h30 - 17h30
+    ];
+
+    let travailMin = 0;
+    for (let min = startMin; min < endMin; min++) {
+        const inWork = workRanges.some(r => min >= r.start && min < r.end);
+        if (inWork) travailMin++;
+    }
+
+    const totalMin = endMin - startMin;
+    const horsMin = totalMin - travailMin;
+
+    return {
+        travail: travailMin / 60,
+        hors: horsMin / 60
+    };
+};
 
 const themes = {
     dark: { bg: '#181c24', card: '#353b4a', btn: '#bfa76a', btnText: '#353b4a', border: '#bfa76a', accent: '#bfa76a', text: '#f5f5f5', textMuted: '#f5f5f5cc' },
@@ -300,7 +327,9 @@ function AddEntryModal({ onClose, onSave, editing, date: initDate, projects, t, 
         onSave({ id: editing?.id || Date.now().toString(), date, category: cat, subCategory: cat === 'atelier' ? subCat : null, projectId: projectId || null, clientName: client || null, hours: parseFloat(hours.dec), startTime: start, endTime: end, description: desc, isExtra: extra });
         if (!editing) { setStartH(''); setStartM(''); setEndH(''); setEndM(''); setClient(''); setCat(''); setSubCat(''); setProjectId(''); setDesc(''); setExtra(false); }
     };
-    const addPanier = () => { onSave({ id: Date.now().toString(), date, category: 'panier', projectId: null, hours: 0, startTime: '', endTime: '', description: 'Indemnité panier', isExtra: false, checkPanierDuplicate: true }); setConfirm(true); };
+    const [showPanierConfirm, setShowPanierConfirm] = useState(false);
+    const addPanier = () => { setShowPanierConfirm(true); };
+    const confirmPanier = () => { onSave({ id: Date.now().toString(), date, category: 'panier', projectId: null, hours: 0, startTime: '', endTime: '', description: 'Indemnité panier', isExtra: false, checkPanierDuplicate: true }); setShowPanierConfirm(false); };
     const inp = { backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text };
     const hoursOpts = Array.from({ length: 24 }, (_, i) => i);
     const minsOpts = [0, 15, 30, 45];
@@ -313,10 +342,10 @@ function AddEntryModal({ onClose, onSave, editing, date: initDate, projects, t, 
                     <div><label style={{ color: t.text }} className="block text-sm font-medium mb-2">Date</label><input type="date" value={date} max={new Date().toISOString().split('T')[0]} onChange={e => setDate(e.target.value)} style={inp} className="w-full px-4 py-2 rounded-lg" /></div>
                     {!editing && <div style={{ backgroundColor: t.bg, border: `2px solid ${t.border}` }} className="p-4 rounded-lg"><button onClick={addPanier} style={{ backgroundColor: t.btn, color: t.btnText }} className="w-full py-2 rounded-lg font-semibold">+ Ajouter panier</button></div>}
                     <div style={{ borderTop: `1px solid ${t.border}` }} className="pt-4">
-                        <div className="grid grid-cols-3 gap-4">
-                            <div><label style={{ color: t.text }} className="block text-sm font-medium mb-2">Début</label><div className="flex gap-2"><select value={startH} onChange={e => setStartH(e.target.value)} style={inp} className="flex-1 px-2 py-2 rounded-lg"><option value="">HH</option>{hoursOpts.map(h => <option key={h} value={h.toString().padStart(2, '0')}>{h.toString().padStart(2, '0')}</option>)}</select><select value={startM} onChange={e => setStartM(e.target.value)} style={inp} className="flex-1 px-2 py-2 rounded-lg"><option value="">MM</option>{minsOpts.map(m => <option key={m} value={m.toString().padStart(2, '0')}>{m.toString().padStart(2, '0')}</option>)}</select></div></div>
-                            <div><label style={{ color: t.text }} className="block text-sm font-medium mb-2">Fin</label><div className="flex gap-2"><select value={endH} onChange={e => setEndH(e.target.value)} style={inp} className="flex-1 px-2 py-2 rounded-lg"><option value="">HH</option>{hoursOpts.map(h => <option key={h} value={h.toString().padStart(2, '0')}>{h.toString().padStart(2, '0')}</option>)}</select><select value={endM} onChange={e => setEndM(e.target.value)} style={inp} className="flex-1 px-2 py-2 rounded-lg"><option value="">MM</option>{minsOpts.map(m => <option key={m} value={m.toString().padStart(2, '0')}>{m.toString().padStart(2, '0')}</option>)}</select></div></div>
-                            <div><label style={{ color: t.text }} className="block text-sm font-medium mb-2">Durée</label><input type="text" value={hours.disp} readOnly style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.accent }} className="w-full px-4 py-2 rounded-lg font-bold" /></div>
+                        <div className="grid grid-cols-5 gap-2">
+                            <div className="col-span-2"><label style={{ color: t.text }} className="block text-sm font-medium mb-2">Début</label><div className="flex gap-1"><select value={startH} onChange={e => setStartH(e.target.value)} style={inp} className="flex-1 px-1 py-2 rounded-lg text-sm"><option value="">HH</option>{hoursOpts.map(h => <option key={h} value={h.toString().padStart(2, '0')}>{h.toString().padStart(2, '0')}</option>)}</select><select value={startM} onChange={e => setStartM(e.target.value)} style={inp} className="flex-1 px-1 py-2 rounded-lg text-sm"><option value="">MM</option>{minsOpts.map(m => <option key={m} value={m.toString().padStart(2, '0')}>{m.toString().padStart(2, '0')}</option>)}</select></div></div>
+                            <div className="col-span-2"><label style={{ color: t.text }} className="block text-sm font-medium mb-2">Fin</label><div className="flex gap-1"><select value={endH} onChange={e => setEndH(e.target.value)} style={inp} className="flex-1 px-1 py-2 rounded-lg text-sm"><option value="">HH</option>{hoursOpts.map(h => <option key={h} value={h.toString().padStart(2, '0')}>{h.toString().padStart(2, '0')}</option>)}</select><select value={endM} onChange={e => setEndM(e.target.value)} style={inp} className="flex-1 px-1 py-2 rounded-lg text-sm"><option value="">MM</option>{minsOpts.map(m => <option key={m} value={m.toString().padStart(2, '0')}>{m.toString().padStart(2, '0')}</option>)}</select></div></div>
+                            <div className="col-span-1"><label style={{ color: t.text }} className="block text-sm font-medium mb-2">Durée</label><input type="text" value={hours.disp} readOnly style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.accent }} className="w-full px-1 py-2 rounded-lg font-bold text-sm text-center" /></div>
                         </div>
                         {error && <div className="mt-2 bg-red-500/20 text-red-400 px-4 py-2 rounded-lg text-sm border border-red-500">{error}</div>}
                         <div className="mt-4"><label style={{ color: t.text }} className="block text-sm font-medium mb-2">Catégorie</label> <select value={cat} onChange={e => { setCat(e.target.value); setSubCat(''); }} style={inp} className="w-full px-4 py-2 rounded-lg"><option value="">Sélectionner</option><option value="trajet">Trajet</option><option value="pose">Pose</option><option value="atelier">Atelier</option><option value="bureau">Bureau</option></select> </div>
@@ -330,215 +359,227 @@ function AddEntryModal({ onClose, onSave, editing, date: initDate, projects, t, 
                     </div>
                 </div>
             </div>
+            {showPanierConfirm && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                    <div style={{ backgroundColor: t.card, border: `2px solid ${t.border}` }} className="rounded-lg p-6 w-full max-w-sm">
+                        <h3 style={{ color: t.accent }} className="text-xl font-bold mb-4">Confirmer le panier</h3>
+                        <p style={{ color: t.text }} className="mb-6">Ajouter un panier pour le {formatDate(date)} ?</p>
+                        <div className="flex space-x-3">
+                            <button onClick={() => setShowPanierConfirm(false)} style={{ backgroundColor: t.bg, color: t.text, border: `1px solid ${t.border}` }} className="flex-1 py-2 rounded-lg">Annuler</button>
+                            <button onClick={confirmPanier} style={{ backgroundColor: t.btn, color: t.btnText }} className="flex-1 py-2 rounded-lg font-semibold">Confirmer</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
 function ChefAtelierView({ currentUser, timeEntries, projects, onDelete, onEdit, onAdd, t }) {
-  const [view, setView] = useState('heures');
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [selectedWeek, setSelectedWeek] = useState('all');
-  const [selectedProject, setSelectedProject] = useState('');
-  const [selectedClient, setSelectedClient] = useState('all');
-  
-  const myEntries = timeEntries.filter(e => e.userId === currentUser.id);
-  const weeks = [...new Set(myEntries.map(e => `${getWeekYear(e.date)}-S${getWeekNumber(e.date)}`))].sort().reverse();
-  const filteredEntries = selectedWeek === 'all' ? myEntries : myEntries.filter(e => `${getWeekYear(e.date)}-S${getWeekNumber(e.date)}` === selectedWeek);
-  const byDate = filteredEntries.reduce((a, e) => { if (!a[e.date]) a[e.date] = []; a[e.date].push(e); return a; }, {});
-  const dates = Object.keys(byDate).sort().reverse();
-  const total = filteredEntries.reduce((s, e) => s + e.hours, 0);
-  const paniers = countPaniers(filteredEntries);
-  const totalAtelier = filteredEntries.filter(e => e.category === 'atelier').reduce((s, e) => s + e.hours, 0);
-  const totalPose = filteredEntries.filter(e => e.category === 'pose').reduce((s, e) => s + e.hours, 0);
-  const totalTrajet = filteredEntries.filter(e => e.category === 'trajet').reduce((s, e) => s + e.hours, 0);
+    const [view, setView] = useState('heures');
+    const [confirmDelete, setConfirmDelete] = useState(null);
+    const [selectedWeek, setSelectedWeek] = useState('all');
+    const [selectedProject, setSelectedProject] = useState('');
+    const [selectedClient, setSelectedClient] = useState('all');
 
-  const allAtelierEntries = timeEntries.filter(e => e.category === 'atelier' && e.subCategory !== 'Vernis');
-  const allVernisEntries = timeEntries.filter(e => e.category === 'atelier' && e.subCategory === 'Vernis');
-  const allPoseEntries = timeEntries.filter(e => e.category === 'pose');
+    const myEntries = timeEntries.filter(e => e.userId === currentUser.id);
+    const weeks = [...new Set(myEntries.map(e => `${getWeekYear(e.date)}-S${getWeekNumber(e.date)}`))].sort().reverse();
+    const filteredEntries = selectedWeek === 'all' ? myEntries : myEntries.filter(e => `${getWeekYear(e.date)}-S${getWeekNumber(e.date)}` === selectedWeek);
+    const byDate = filteredEntries.reduce((a, e) => { if (!a[e.date]) a[e.date] = []; a[e.date].push(e); return a; }, {});
+    const dates = Object.keys(byDate).sort().reverse();
+    const total = filteredEntries.reduce((s, e) => s + e.hours, 0);
+    const paniers = countPaniers(filteredEntries);
+    const totalAtelier = filteredEntries.filter(e => e.category === 'atelier').reduce((s, e) => s + e.hours, 0);
+    const totalPose = filteredEntries.filter(e => e.category === 'pose').reduce((s, e) => s + e.hours, 0);
+    const totalTrajet = filteredEntries.filter(e => e.category === 'trajet').reduce((s, e) => s + e.hours, 0);
 
-  const getProjectStats = (projectId) => {
-    const p = projects.find(pr => pr.id === projectId);
-    if (!p) return null;
-    const atelierHours = allAtelierEntries.filter(e => e.projectId === projectId).reduce((s, e) => s + e.hours, 0);
-    const vernisHours = allVernisEntries.filter(e => e.projectId === projectId).reduce((s, e) => s + e.hours, 0);
-    const poseHours = allPoseEntries.filter(e => e.projectId === projectId).reduce((s, e) => s + e.hours, 0);
-    return { ...p, atelierHours, vernisHours, poseHours };
-  };
+    const allAtelierEntries = timeEntries.filter(e => e.category === 'atelier' && e.subCategory !== 'Vernis');
+    const allVernisEntries = timeEntries.filter(e => e.category === 'atelier' && e.subCategory === 'Vernis');
+    const allPoseEntries = timeEntries.filter(e => e.category === 'pose');
 
-  const projectsWithStats = projects.map(p => getProjectStats(p.id)).filter(Boolean);
-  const clients = [...new Set(projects.map(p => p.client))].sort();
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 style={{ color: t.accent }} className="text-2xl font-bold">Chef d'atelier</h2>
-        <div className="flex gap-2">
-          <button onClick={() => setView('heures')} style={{ backgroundColor: view === 'heures' ? t.btn : t.bg, color: view === 'heures' ? t.btnText : t.text, border: `2px solid ${t.border}` }} className="px-4 py-2 rounded-lg font-semibold">Mes heures</button>
-          <button onClick={() => setView('projets')} style={{ backgroundColor: view === 'projets' ? t.btn : t.bg, color: view === 'projets' ? t.btnText : t.text, border: `2px solid ${t.border}` }} className="px-4 py-2 rounded-lg font-semibold">Vue projets</button>
-        </div>
-      </div>
-
-      {view === 'heures' && (
-        <>
-          <div className="flex justify-end">
-            <button onClick={onAdd} style={{ backgroundColor: t.btn, color: t.btnText }} className="flex items-center px-4 py-2 rounded-lg font-semibold"><Plus className="w-5 h-5 mr-2" />Ajouter</button>
-          </div>
-          <div>
-            <label style={{ color: t.text }} className="block text-sm font-medium mb-2">Semaine</label>
-            <select value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
-              <option value="all">Toutes les semaines</option>
-              {weeks.map(w => <option key={w} value={w}>{formatWeekLabel(w)}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ color: t.text }} className="block text-sm font-medium mb-2">Voir un projet</label>
-            <select onChange={e => setSelectedProject(e.target.value)} value={selectedProject} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
-              <option value="">-- Sélectionner un projet --</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.client} - {p.name}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="p-6 rounded-lg">
-              <p style={{ color: t.textMuted }} className="mb-2">Total heures</p>
-              <p style={{ color: t.accent }} className="text-2xl font-bold">{formatHours(total)}</p>
-              <div className="mt-2 text-sm">
-                <p style={{ color: t.textMuted }}>Atelier: <span style={{ color: t.text }}>{formatHours(totalAtelier)}</span></p>
-                <p style={{ color: t.textMuted }}>Pose: <span style={{ color: t.text }}>{formatHours(totalPose)}</span></p>
-                <p style={{ color: t.textMuted }}>Trajet: <span style={{ color: t.text }}>{formatHours(totalTrajet)}</span></p>
-              </div>
-            </div>
-            <div style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="p-6 rounded-lg">
-              <p style={{ color: t.textMuted }}>Paniers</p>
-              <p style={{ color: t.accent }} className="text-3xl font-bold">{paniers}</p>
-            </div>
-          </div>
-          <div className="space-y-4">
-            {dates.map(d => {
-              const dayEntries = byDate[d];
-              const dayTotal = dayEntries.reduce((s, e) => s + e.hours, 0);
-              const hasPanier = dayEntries.some(e => e.category === 'panier');
-              return (
-                <div key={d} style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="rounded-lg p-4">
-                  <div className="mb-3"><h3 style={{ color: t.accent }} className="font-bold text-lg">{formatDate(d)}</h3><p style={{ color: t.textMuted }} className="text-sm">{formatHours(dayTotal)}{hasPanier && ' 🍽️'}</p></div>
-                  <div className="space-y-2">
-                    {dayEntries.map(e => {
-                      const proj = e.projectId ? projects.find(p => p.id === e.projectId) : null;
-                      return (
-                        <div key={e.id} style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="flex justify-between items-start p-3 rounded">
-                          <div className="flex-1">
-                            <div className="flex items-center space-x-2"><span style={{ color: t.text }} className="font-semibold capitalize">{e.category}{e.subCategory ? ` - ${e.subCategory}` : ''}</span>{e.category !== 'panier' && <span style={{ color: t.textMuted }}>{e.startTime} - {e.endTime} ({formatHours(e.hours)})</span>}</div>
-                            {proj ? <p style={{ color: t.textMuted }} className="text-sm mt-1">{proj.client} - {proj.name}</p> : e.clientName && <p style={{ color: t.textMuted }} className="text-sm mt-1">{e.clientName}</p>}
-                            {e.description && <p style={{ color: t.textMuted }} className="text-sm mt-1">{e.description}</p>}
-                          </div>
-                          <div className="flex space-x-4 ml-4"><button onClick={() => onEdit(e)} style={{ color: t.accent }}><Edit className="w-5 h-5" /></button><button onClick={() => setConfirmDelete(e.id)} className="text-red-500"><Trash2 className="w-5 h-5" /></button></div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-        {view === 'projets' && (
-        <div className="space-y-4">
-          <div>
-            <label style={{ color: t.text }} className="block text-sm font-medium mb-2">Client</label>
-            <select value={selectedClient} onChange={e => setSelectedClient(e.target.value)} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
-              <option value="all">Tous les clients</option>
-              {clients.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          {projectsWithStats.filter(p => selectedClient === 'all' || p.client === selectedClient).map(p => (
-            <div key={p.id} style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="rounded-lg p-4">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 style={{ color: t.accent }} className="text-lg font-bold">{p.client}</h3>
-                  <p style={{ color: t.textMuted }}>{p.name}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-3 rounded text-center">
-                  <p style={{ color: t.accent }} className="font-semibold">Atelier</p>
-                  <p style={{ color: t.text }} className="font-bold">{formatHours(p.atelierHours)}</p>
-                </div>
-                <div style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-3 rounded text-center">
-                  <p style={{ color: '#f97316' }} className="font-semibold">Vernis</p>
-                  <p style={{ color: t.text }} className="font-bold">{formatHours(p.vernisHours)}</p>
-                </div>
-                <div style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-3 rounded text-center">
-                  <p style={{ color: '#22c55e' }} className="font-semibold">Pose</p>
-                  <p style={{ color: t.text }} className="font-bold">{formatHours(p.poseHours)}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {selectedProject && (() => {
-        const p = projects.find(pr => pr.id === selectedProject);
+    const getProjectStats = (projectId) => {
+        const p = projects.find(pr => pr.id === projectId);
         if (!p) return null;
-        const projectEntries = timeEntries.filter(e => e.projectId === p.id);
-        const atelierDone = projectEntries.filter(e => e.category === 'atelier').reduce((s, e) => s + e.hours, 0);
-        const poseDone = projectEntries.filter(e => e.category === 'pose').reduce((s, e) => s + e.hours, 0);
-        const atelierPct = (p.estimatedAtelierHours || 0) > 0 ? (atelierDone / p.estimatedAtelierHours) * 100 : 0;
-        const posePct = (p.estimatedPoseHours || 0) > 0 ? (poseDone / p.estimatedPoseHours) * 100 : 0;
-        return (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div style={{ backgroundColor: t.card, border: `2px solid ${t.border}` }} className="rounded-lg p-6 w-full max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h3 style={{ color: t.accent }} className="text-xl font-bold">{p.name}</h3>
-                  <p style={{ color: t.textMuted }}>{p.client}</p>
-                </div>
-                <button onClick={() => setSelectedProject('')} style={{ color: t.text }}><X className="w-6 h-6" /></button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span style={{ color: t.accent }} className="text-sm font-semibold">Atelier: {formatHours(atelierDone)} / {formatHours(p.estimatedAtelierHours || 0)}</span>
-                    <span style={{ color: (p.estimatedAtelierHours || 0) - atelierDone >= 0 ? '#22c55e' : '#ef4444' }} className="text-sm font-semibold">
-                      {(p.estimatedAtelierHours || 0) - atelierDone >= 0 ? 'Reste' : 'Dépassement'}: {formatHours(Math.abs((p.estimatedAtelierHours || 0) - atelierDone))}
-                    </span>
-                  </div>
-                  <div style={{ backgroundColor: t.bg }} className="h-3 rounded overflow-hidden">
-                    <div style={{ width: `${Math.min(atelierPct, 100)}%`, backgroundColor: atelierPct > 100 ? '#ef4444' : atelierPct > 80 ? '#eab308' : '#22c55e' }} className="h-full" />
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span style={{ color: t.accent }} className="text-sm font-semibold">Pose: {formatHours(poseDone)} / {formatHours(p.estimatedPoseHours || 0)}</span>
-                    <span style={{ color: (p.estimatedPoseHours || 0) - poseDone >= 0 ? '#22c55e' : '#ef4444' }} className="text-sm font-semibold">
-                      {(p.estimatedPoseHours || 0) - poseDone >= 0 ? 'Reste' : 'Dépassement'}: {formatHours(Math.abs((p.estimatedPoseHours || 0) - poseDone))}
-                    </span>
-                  </div>
-                  <div style={{ backgroundColor: t.bg }} className="h-3 rounded overflow-hidden">
-                    <div style={{ width: `${Math.min(posePct, 100)}%`, backgroundColor: posePct > 100 ? '#ef4444' : posePct > 80 ? '#eab308' : '#22c55e' }} className="h-full" />
-                  </div>
-                </div>
-              </div>
-              <button onClick={() => setSelectedProject('')} style={{ backgroundColor: t.btn, color: t.btnText }} className="w-full py-2 rounded-lg font-semibold mt-6">Fermer</button>
-            </div>
-          </div>
-        );
-      })()}
+        const atelierHours = allAtelierEntries.filter(e => e.projectId === projectId).reduce((s, e) => s + e.hours, 0);
+        const vernisHours = allVernisEntries.filter(e => e.projectId === projectId).reduce((s, e) => s + e.hours, 0);
+        const poseHours = allPoseEntries.filter(e => e.projectId === projectId).reduce((s, e) => s + e.hours, 0);
+        return { ...p, atelierHours, vernisHours, poseHours };
+    };
 
-      {confirmDelete && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div style={{ backgroundColor: t.card, border: `2px solid ${t.border}` }} className="rounded-lg p-6 w-full max-w-sm">
-            <h3 style={{ color: t.accent }} className="text-xl font-bold mb-4">Confirmer la suppression</h3>
-            <p style={{ color: t.text }} className="mb-6">Supprimer cette entrée ?</p>
-            <div className="flex space-x-3">
-              <button onClick={() => setConfirmDelete(null)} style={{ backgroundColor: t.bg, color: t.text, border: `1px solid ${t.border}` }} className="flex-1 py-2 rounded-lg">Annuler</button>
-              <button onClick={() => { onDelete(confirmDelete); setConfirmDelete(null); }} className="flex-1 bg-red-600 text-white py-2 rounded-lg">Supprimer</button>
+    const projectsWithStats = projects.map(p => getProjectStats(p.id)).filter(Boolean);
+    const clients = [...new Set(projects.map(p => p.client))].sort();
+
+    return (
+        <div className="space-y-6">
+            <div className="flex justify-between items-center">
+                <h2 style={{ color: t.accent }} className="text-2xl font-bold">Chef d'atelier</h2>
+                <div className="flex gap-2">
+                    <button onClick={() => setView('heures')} style={{ backgroundColor: view === 'heures' ? t.btn : t.bg, color: view === 'heures' ? t.btnText : t.text, border: `2px solid ${t.border}` }} className="px-4 py-2 rounded-lg font-semibold">Mes heures</button>
+                    <button onClick={() => setView('projets')} style={{ backgroundColor: view === 'projets' ? t.btn : t.bg, color: view === 'projets' ? t.btnText : t.text, border: `2px solid ${t.border}` }} className="px-4 py-2 rounded-lg font-semibold">Vue projets</button>
+                </div>
             </div>
-          </div>
+
+            {view === 'heures' && (
+                <>
+                    <div className="flex justify-end">
+                        <button onClick={onAdd} style={{ backgroundColor: t.btn, color: t.btnText }} className="flex items-center px-4 py-2 rounded-lg font-semibold"><Plus className="w-5 h-5 mr-2" />Ajouter</button>
+                    </div>
+                    <div>
+                        <label style={{ color: t.text }} className="block text-sm font-medium mb-2">Semaine</label>
+                        <select value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
+                            <option value="all">Toutes les semaines</option>
+                            {weeks.map(w => <option key={w} value={w}>{formatWeekLabel(w)}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label style={{ color: t.text }} className="block text-sm font-medium mb-2">Voir un projet</label>
+                        <select onChange={e => setSelectedProject(e.target.value)} value={selectedProject} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
+                            <option value="">-- Sélectionner un projet --</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.client} - {p.name}</option>)}
+                        </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="p-6 rounded-lg">
+                            <p style={{ color: t.textMuted }} className="mb-2">Total heures</p>
+                            <p style={{ color: t.accent }} className="text-2xl font-bold">{formatHours(total)}</p>
+                            <div className="mt-2 text-sm">
+                                <p style={{ color: t.textMuted }}>Atelier: <span style={{ color: t.text }}>{formatHours(totalAtelier)}</span></p>
+                                <p style={{ color: t.textMuted }}>Pose: <span style={{ color: t.text }}>{formatHours(totalPose)}</span></p>
+                                <p style={{ color: t.textMuted }}>Trajet: <span style={{ color: t.text }}>{formatHours(totalTrajet)}</span></p>
+                            </div>
+                        </div>
+                        <div style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="p-6 rounded-lg">
+                            <p style={{ color: t.textMuted }}>Paniers</p>
+                            <p style={{ color: t.accent }} className="text-3xl font-bold">{paniers}</p>
+                        </div>
+                    </div>
+                    <div className="space-y-4">
+                        {dates.map(d => {
+                            const dayEntries = byDate[d];
+                            const dayTotal = dayEntries.reduce((s, e) => s + e.hours, 0);
+                            const hasPanier = dayEntries.some(e => e.category === 'panier');
+                            return (
+                                <div key={d} style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="rounded-lg p-4">
+                                    <div className="mb-3"><h3 style={{ color: t.accent }} className="font-bold text-lg">{formatDate(d)}</h3><p style={{ color: t.textMuted }} className="text-sm">{formatHours(dayTotal)}{hasPanier && ' 🍽️'}</p></div>
+                                    <div className="space-y-2">
+                                        {dayEntries.map(e => {
+                                            const proj = e.projectId ? projects.find(p => p.id === e.projectId) : null;
+                                            return (
+                                                <div key={e.id} style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="flex justify-between items-start p-3 rounded">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center space-x-2"><span style={{ color: t.text }} className="font-semibold capitalize">{e.category}{e.subCategory ? ` - ${e.subCategory}` : ''}</span>{e.category !== 'panier' && <span style={{ color: t.textMuted }}>{e.startTime} - {e.endTime} ({formatHours(e.hours)})</span>}</div>
+                                                        {proj ? <p style={{ color: t.textMuted }} className="text-sm mt-1">{proj.client} - {proj.name}</p> : e.clientName && <p style={{ color: t.textMuted }} className="text-sm mt-1">{e.clientName}</p>}
+                                                        {e.description && <p style={{ color: t.textMuted }} className="text-sm mt-1">{e.description}</p>}
+                                                    </div>
+                                                    <div className="flex space-x-4 ml-4"><button onClick={() => onEdit(e)} style={{ color: t.accent }}><Edit className="w-5 h-5" /></button><button onClick={() => setConfirmDelete(e.id)} className="text-red-500"><Trash2 className="w-5 h-5" /></button></div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </>
+            )}
+
+            {view === 'projets' && (
+                <div className="space-y-4">
+                    <div>
+                        <label style={{ color: t.text }} className="block text-sm font-medium mb-2">Client</label>
+                        <select value={selectedClient} onChange={e => setSelectedClient(e.target.value)} style={{ backgroundColor: t.bg, border: `2px solid ${t.border}`, color: t.text }} className="w-full px-4 py-2 rounded-lg">
+                            <option value="all">Tous les clients</option>
+                            {clients.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
+                    {projectsWithStats.filter(p => selectedClient === 'all' || p.client === selectedClient).map(p => (
+                        <div key={p.id} style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="rounded-lg p-4">
+                            <div className="flex justify-between items-start mb-4">
+                                <div>
+                                    <h3 style={{ color: t.accent }} className="text-lg font-bold">{p.client}</h3>
+                                    <p style={{ color: t.textMuted }}>{p.name}</p>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                                <div style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-3 rounded text-center">
+                                    <p style={{ color: t.accent }} className="font-semibold">Atelier</p>
+                                    <p style={{ color: t.text }} className="font-bold">{formatHours(p.atelierHours)}</p>
+                                </div>
+                                <div style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-3 rounded text-center">
+                                    <p style={{ color: '#f97316' }} className="font-semibold">Vernis</p>
+                                    <p style={{ color: t.text }} className="font-bold">{formatHours(p.vernisHours)}</p>
+                                </div>
+                                <div style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-3 rounded text-center">
+                                    <p style={{ color: '#22c55e' }} className="font-semibold">Pose</p>
+                                    <p style={{ color: t.text }} className="font-bold">{formatHours(p.poseHours)}</p>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {selectedProject && (() => {
+                const p = projects.find(pr => pr.id === selectedProject);
+                if (!p) return null;
+                const projectEntries = timeEntries.filter(e => e.projectId === p.id);
+                const atelierDone = projectEntries.filter(e => e.category === 'atelier').reduce((s, e) => s + e.hours, 0);
+                const poseDone = projectEntries.filter(e => e.category === 'pose').reduce((s, e) => s + e.hours, 0);
+                const atelierPct = (p.estimatedAtelierHours || 0) > 0 ? (atelierDone / p.estimatedAtelierHours) * 100 : 0;
+                const posePct = (p.estimatedPoseHours || 0) > 0 ? (poseDone / p.estimatedPoseHours) * 100 : 0;
+                return (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                        <div style={{ backgroundColor: t.card, border: `2px solid ${t.border}` }} className="rounded-lg p-6 w-full max-w-md">
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h3 style={{ color: t.accent }} className="text-xl font-bold">{p.name}</h3>
+                                    <p style={{ color: t.textMuted }}>{p.client}</p>
+                                </div>
+                                <button onClick={() => setSelectedProject('')} style={{ color: t.text }}><X className="w-6 h-6" /></button>
+                            </div>
+                            <div className="space-y-4">
+                                <div>
+                                    <div className="flex justify-between mb-1">
+                                        <span style={{ color: t.accent }} className="text-sm font-semibold">Atelier: {formatHours(atelierDone)} / {formatHours(p.estimatedAtelierHours || 0)}</span>
+                                        <span style={{ color: (p.estimatedAtelierHours || 0) - atelierDone >= 0 ? '#22c55e' : '#ef4444' }} className="text-sm font-semibold">
+                                            {(p.estimatedAtelierHours || 0) - atelierDone >= 0 ? 'Reste' : 'Dépassement'}: {formatHours(Math.abs((p.estimatedAtelierHours || 0) - atelierDone))}
+                                        </span>
+                                    </div>
+                                    <div style={{ backgroundColor: t.bg }} className="h-3 rounded overflow-hidden">
+                                        <div style={{ width: `${Math.min(atelierPct, 100)}%`, backgroundColor: atelierPct > 100 ? '#ef4444' : atelierPct > 80 ? '#eab308' : '#22c55e' }} className="h-full" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between mb-1">
+                                        <span style={{ color: t.accent }} className="text-sm font-semibold">Pose: {formatHours(poseDone)} / {formatHours(p.estimatedPoseHours || 0)}</span>
+                                        <span style={{ color: (p.estimatedPoseHours || 0) - poseDone >= 0 ? '#22c55e' : '#ef4444' }} className="text-sm font-semibold">
+                                            {(p.estimatedPoseHours || 0) - poseDone >= 0 ? 'Reste' : 'Dépassement'}: {formatHours(Math.abs((p.estimatedPoseHours || 0) - poseDone))}
+                                        </span>
+                                    </div>
+                                    <div style={{ backgroundColor: t.bg }} className="h-3 rounded overflow-hidden">
+                                        <div style={{ width: `${Math.min(posePct, 100)}%`, backgroundColor: posePct > 100 ? '#ef4444' : posePct > 80 ? '#eab308' : '#22c55e' }} className="h-full" />
+                                    </div>
+                                </div>
+                            </div>
+                            <button onClick={() => setSelectedProject('')} style={{ backgroundColor: t.btn, color: t.btnText }} className="w-full py-2 rounded-lg font-semibold mt-6">Fermer</button>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {confirmDelete && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                    <div style={{ backgroundColor: t.card, border: `2px solid ${t.border}` }} className="rounded-lg p-6 w-full max-w-sm">
+                        <h3 style={{ color: t.accent }} className="text-xl font-bold mb-4">Confirmer la suppression</h3>
+                        <p style={{ color: t.text }} className="mb-6">Supprimer cette entrée ?</p>
+                        <div className="flex space-x-3">
+                            <button onClick={() => setConfirmDelete(null)} style={{ backgroundColor: t.bg, color: t.text, border: `1px solid ${t.border}` }} className="flex-1 py-2 rounded-lg">Annuler</button>
+                            <button onClick={() => { onDelete(confirmDelete); setConfirmDelete(null); }} className="flex-1 bg-red-600 text-white py-2 rounded-lg">Supprimer</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
-      )}
-    </div>
-  );
+    );
 }
 function EmployeeView({ currentUser, timeEntries, projects, onDelete, onEdit, onAdd, t }) {
     const [confirmDelete, setConfirmDelete] = useState(null);
@@ -723,25 +764,96 @@ function RHView({ timeEntries, users, onDeleteUser, t }) {
         let y = 20;
         const employee = employees.find(e => e.id === emp);
         const empEntries = filtered.filter(e => e.userId === emp);
+
+        // Titre
         doc.setTextColor(...accentColor);
-        doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.text(`Fiche : ${employee?.name}`, 14, y); y += 16;
-        doc.setTextColor(...textColor);
-        doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.text(formatWeekLabel(week), 14, y); y += 8; doc.text(`Édité le ${new Date().toLocaleDateString('fr-FR')}`, 14, y); y += 16;
-        doc.setFillColor(...cardColor); doc.rect(10, y - 5, 190, 44, 'F');
-        doc.setTextColor(...accentColor);
-        doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.text('Résumé', 14, y); y += 12;
+        doc.setFontSize(18); doc.setFont(undefined, 'bold');
+        doc.text(`Fiche : ${employee?.name}`, 14, y); y += 12;
         doc.setTextColor(...textColor);
         doc.setFontSize(12); doc.setFont(undefined, 'normal');
-        ['atelier', 'pose', 'trajet'].forEach(c => { doc.text(`${c.charAt(0).toUpperCase() + c.slice(1)} : ${formatHours(empEntries.filter(e => e.category === c).reduce((s, e) => s + e.hours, 0))}`, 14, y); y += 8; });
-        doc.text(`Paniers : ${empEntries.filter(e => e.category === 'panier').length}`, 14, y); y += 16;
-        const panierEntries = empEntries.filter(e => e.category === 'panier');
-        if (panierEntries.length > 0) {
+        doc.text(formatWeekLabel(week), 14, y); y += 8;
+        doc.text(`Édité le ${new Date().toLocaleDateString('fr-FR')}`, 14, y); y += 12;
+
+        // Grouper par date
+        const byDate = empEntries.reduce((a, e) => { if (!a[e.date]) a[e.date] = []; a[e.date].push(e); return a; }, {});
+        const dates = Object.keys(byDate).sort();
+
+        // Pour chaque jour
+        dates.forEach(date => {
+            const dayEntries = byDate[date].sort((a, b) => a.startTime?.localeCompare(b.startTime));
+            const dayTotal = dayEntries.reduce((s, e) => s + e.hours, 0);
+            const dayPaniers = dayEntries.filter(e => e.category === 'panier').length;
+
+            // Nouvelle page si besoin
+            if (y > 240) { doc.addPage(); y = 20; doc.setFillColor(...bgColor); doc.rect(0, 0, 210, 297, 'F'); }
+
+            // En-tête du jour
+            doc.setFillColor(...cardColor); doc.rect(10, y - 5, 190, 10, 'F');
             doc.setTextColor(...accentColor);
-            doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.text(`Paniers (${panierEntries.length})`, 14, y); y += 12;
+            doc.setFontSize(12); doc.setFont(undefined, 'bold');
+            doc.text(`${formatDate(date)}`, 14, y);
+            doc.text(`Total : ${formatHours(dayTotal)}${dayPaniers > 0 ? ' (panier)' : ''}`, 150, y);
+            y += 12;
+
+            // Entrées du jour
+            doc.setFontSize(10); doc.setFont(undefined, 'normal');
+            dayEntries.forEach(e => {
+                if (y > 270) { doc.addPage(); y = 20; doc.setFillColor(...bgColor); doc.rect(0, 0, 210, 297, 'F'); }
+
+                if (e.category === 'panier') {
+                    doc.setTextColor(...accentColor);
+                    doc.text(`  Panier`, 14, y); y += 6;
+                } else {
+                    const color = e.category === 'trajet' ? [59, 130, 246] : e.category === 'pose' ? [34, 197, 94] : [249, 115, 22];
+                    doc.setTextColor(...color);
+                    doc.text(`  Action : ${e.category}${e.subCategory ? ' - ' + e.subCategory : ''}`, 14, y); y += 6;
+                    doc.setTextColor(...textColor);
+                    doc.text(`  Début : ${e.startTime}    Fin : ${e.endTime}    Durée : ${formatHours(e.hours)}`, 14, y); y += 6;
+
+                    // Détail trajets
+                    if (e.category === 'trajet') {
+                        const split = calcTrajetSplit(e.startTime, e.endTime);
+                        doc.setTextColor(34, 197, 94);
+                        doc.text(`      Temps de travail : ${formatHours(split.travail)}`, 14, y); y += 5;
+                        doc.setTextColor(249, 115, 22);
+                        doc.text(`      Hors temps de travail : ${formatHours(split.hors)}`, 14, y); y += 6;
+                    }
+                }
+                y += 2;
+            });
+            y += 4;
+        });
+
+        // Total semaine
+        if (y > 240) { doc.addPage(); y = 20; doc.setFillColor(...bgColor); doc.rect(0, 0, 210, 297, 'F'); }
+        const weekTotal = empEntries.reduce((s, e) => s + e.hours, 0);
+        const weekPaniers = empEntries.filter(e => e.category === 'panier').length;
+
+        // Calcul totaux trajets
+        const trajets = empEntries.filter(e => e.category === 'trajet');
+        const trajetTotals = trajets.reduce((acc, e) => {
+            const split = calcTrajetSplit(e.startTime, e.endTime);
+            return { travail: acc.travail + split.travail, hors: acc.hors + split.hors };
+        }, { travail: 0, hors: 0 });
+
+        doc.setFillColor(...accentColor); doc.rect(10, y, 190, 12, 'F');
+        doc.setTextColor(...bgColor);
+        doc.setFontSize(14); doc.setFont(undefined, 'bold');
+        doc.text(`Total semaine : ${formatHours(weekTotal)}${weekPaniers > 0 ? '   ' + weekPaniers + ' panier(s)' : ''}`, 14, y + 8);
+        y += 18;
+
+        // Détail trajets semaine
+        if (trajets.length > 0) {
             doc.setTextColor(...textColor);
-            doc.setFontSize(11); doc.setFont(undefined, 'normal');
-            panierEntries.sort((a, b) => a.date.localeCompare(b.date)).forEach(e => { doc.text(`  ${formatDate(e.date)}`, 14, y); y += 7; });
+            doc.setFontSize(11); doc.setFont(undefined, 'bold');
+            doc.text('Détail trajets semaine :', 14, y); y += 7;
+            doc.setFont(undefined, 'normal');
+            doc.setTextColor(34, 197, 94);
+            doc.text(`Temps de travail : ${formatHours(trajetTotals.travail)}`, 14, y); y += 6;
+            doc.setTextColor(249, 115, 22);
+            doc.text(`Hors temps de travail : ${formatHours(trajetTotals.hors)}`, 14, y);
         }
+
         doc.save(`Fiche_${employee?.name}_${week.split('-S')[1]}_${week.split('-S')[0]}.pdf`);
     };
 
@@ -758,6 +870,89 @@ function RHView({ timeEntries, users, onDeleteUser, t }) {
             <div style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="rounded-lg overflow-hidden">
                 <table className="w-full"><thead style={{ backgroundColor: t.bg }}><tr>{['Employé', 'Trajet', 'Pose', 'Atelier', 'Paniers', 'Total'].map(h => <th key={h} style={{ color: t.textMuted }} className="px-6 py-3 text-left text-xs font-medium uppercase">{h}</th>)}</tr></thead><tbody>{stats.map((s, i) => <tr key={i} style={{ borderTop: `1px solid ${t.border}` }}><td style={{ color: t.accent }} className="px-6 py-4 font-medium">{s.name}</td><td style={{ color: t.text }} className="px-6 py-4">{formatHours(s.trajet)}</td><td style={{ color: t.text }} className="px-6 py-4">{formatHours(s.pose)}</td><td style={{ color: t.text }} className="px-6 py-4">{formatHours(s.atelier)}</td><td style={{ color: t.text }} className="px-6 py-4">{s.paniers}</td><td style={{ color: t.accent }} className="px-6 py-4 font-bold">{formatHours(s.total)}</td></tr>)}</tbody></table>
             </div>
+
+            {emp !== 'all' && week !== 'all' && (() => {
+                const empEntries = filtered.filter(e => e.userId === emp);
+                const byDate = empEntries.reduce((a, e) => { if (!a[e.date]) a[e.date] = []; a[e.date].push(e); return a; }, {});
+                const dates = Object.keys(byDate).sort();
+                const weekTotal = empEntries.reduce((s, e) => s + e.hours, 0);
+                const weekPaniers = empEntries.filter(e => e.category === 'panier').length;
+                return (
+                    <div style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }} className="rounded-lg p-6">
+                        <h3 style={{ color: t.accent }} className="text-xl font-bold mb-4">Détail des heures</h3>
+                        <div className="space-y-6">
+                            {dates.map(date => {
+                                const dayEntries = byDate[date].sort((a, b) => a.startTime?.localeCompare(b.startTime));
+                                const dayTotal = dayEntries.reduce((s, e) => s + e.hours, 0);
+                                const dayPaniers = dayEntries.filter(e => e.category === 'panier').length;
+                                return (
+                                    <div key={date}>
+                                        <div className="flex justify-between items-center mb-3" style={{ borderBottom: `2px solid ${t.border}`, paddingBottom: '8px' }}>
+                                            <h4 style={{ color: t.accent }} className="font-bold text-lg">{formatDate(date)}</h4>
+                                            <div style={{ color: t.text }} className="text-right">
+                                                <span className="font-bold">{formatHours(dayTotal)}</span>
+                                                {dayPaniers > 0 && <span className="ml-2">🍽️</span>}
+                                            </div>
+                                        </div>
+                                        <div className="space-y-3">
+                                            {dayEntries.map(e => (
+                                                <div key={e.id} style={{ backgroundColor: t.bg, border: `1px solid ${t.border}` }} className="p-4 rounded-lg">
+                                                    <p style={{ color: t.text }}><span className="font-semibold">Action :</span> <span style={{ color: e.category === 'trajet' ? '#3b82f6' : e.category === 'pose' ? '#22c55e' : e.category === 'atelier' ? '#f97316' : t.text }}>{e.category}{e.subCategory ? ` - ${e.subCategory}` : ''}</span></p>
+                                                    {e.category !== 'panier' && (
+                                                        <>
+                                                            <p style={{ color: t.text }}><span className="font-semibold">Début :</span> {e.startTime}</p>
+                                                            <p style={{ color: t.text }}><span className="font-semibold">Fin :</span> {e.endTime}</p>
+                                                            <p style={{ color: t.accent }}><span className="font-semibold">Durée :</span> {formatHours(e.hours)}</p>
+                                                            {e.category === 'trajet' && (() => {
+                                                                const split = calcTrajetSplit(e.startTime, e.endTime);
+                                                                return (
+                                                                    <div className="mt-2 pl-2" style={{ borderLeft: `2px solid ${t.border}` }}>
+                                                                        <p style={{ color: '#22c55e' }}><span className="font-semibold">Temps de travail :</span> {formatHours(split.travail)}</p>
+                                                                        <p style={{ color: '#f97316' }}><span className="font-semibold">Hors temps de travail :</span> {formatHours(split.hors)}</p>
+                                                                    </div>
+                                                                );
+                                                            })()}
+                                                        </>
+                                                    )}
+                                                    {e.category === 'panier' && <p style={{ color: t.accent }}>🍽️ Panier</p>}
+
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div className="mt-6 pt-4" style={{ borderTop: `3px solid ${t.accent}` }}>
+                            {(() => {
+                                const trajets = empEntries.filter(e => e.category === 'trajet');
+                                const trajetTotals = trajets.reduce((acc, e) => {
+                                    const split = calcTrajetSplit(e.startTime, e.endTime);
+                                    return { travail: acc.travail + split.travail, hors: acc.hors + split.hors };
+                                }, { travail: 0, hors: 0 });
+                                return (
+                                    <>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span style={{ color: t.accent }} className="text-xl font-bold">Total semaine</span>
+                                            <div className="text-right">
+                                                <span style={{ color: t.accent }} className="text-2xl font-bold">{formatHours(weekTotal)}</span>
+                                                {weekPaniers > 0 && <span style={{ color: t.text }} className="ml-3">{weekPaniers} 🍽️</span>}
+                                            </div>
+                                        </div>
+                                        {trajets.length > 0 && (
+                                            <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${t.border}` }}>
+                                                <p style={{ color: t.textMuted }} className="font-semibold mb-1">Détail trajets :</p>
+                                                <p style={{ color: '#22c55e' }}>Temps de travail : {formatHours(trajetTotals.travail)}</p>
+                                                <p style={{ color: '#f97316' }}>Hors temps de travail : {formatHours(trajetTotals.hors)}</p>
+                                            </div>
+                                        )}
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 }
